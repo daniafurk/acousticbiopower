@@ -62,7 +62,7 @@ def run_pipeline(
       results: Dictionary with per-repetition metrics (used later for CSV export).
       percentage: Integer %1RM parsed from the filename, or None if not found.
     """
-    # 1) Resolve filename → % folder and create output directory
+    # 1) Resolve filename → % folder and create output directory.
 
     filename = os.path.basename(file_path)
     filename_prefix = os.path.splitext(filename)[0]

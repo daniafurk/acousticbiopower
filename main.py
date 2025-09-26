@@ -26,7 +26,7 @@ from main_pipeline import run_pipeline
 
 #Configuration & global stores
 
-# Base directory where participant/session/stimulus folders live
+# Base directory where participant/session/stimulus folders live.
 BASE_PATH = "C:/Users/beatr/Documents/UNIVERSIDADE/5ºANO MIEB/TESE/Recolhas/Participants"
 STIMULI = ("ABF", "GM")
 
