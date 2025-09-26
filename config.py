@@ -1,5 +1,5 @@
 """
-Configuration constants for signal processing.
+Configuration constants for the signal processing.
 """
 ############################### ACC AND LOAD CELL SIGNALS ###################################################
 
