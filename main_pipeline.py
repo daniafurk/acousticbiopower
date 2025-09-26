@@ -19,7 +19,7 @@ Assumptions and units:
 
 Side effects:
 - Creates {output_dir}/{percentage}/ with multiple PNG plots for QA.
-- Logs progress and detected events through the Python 'logging' module.
+- Prints progress and detected events to the console.
 
 Returns:
 - results: dict with per-repetition metrics ready for CSV assembly.
@@ -34,14 +34,10 @@ from metrics import *
 from detection import *
 from analysis import *
 from scipy.ndimage import gaussian_filter1d
-import logging
 import os
 import re
 import numpy as np
 from statsmodels.tsa.seasonal import STL
-
-
-logger = logging.getLogger(__name__)
 
 
 def run_pipeline(
@@ -50,18 +46,7 @@ def run_pipeline(
     save_plots: bool = True,
     show_plots: bool = False,
 ):
-    """Run the full processing and analysis pipeline for one file.
-
-    Args:
-      file_path: Full path to a raw input .txt file containing synchronized signals.
-      output_dir: Base path where plots will be stored (organized by % folder).
-      save_plots: Whether to save plots to disk.
-      show_plots: Whether to display plots interactively.
-
-    Returns:
-      results: Dictionary with per-repetition metrics (used later for CSV export).
-      percentage: Integer %1RM parsed from the filename, or None if not found.
-    """
+    """Run the full processing and analysis pipeline for one file."""
     # 1) Resolve filename → % folder and create output directory
 
     filename = os.path.basename(file_path)
@@ -75,7 +60,7 @@ def run_pipeline(
     final_output_dir = os.path.join(output_dir, percentage_folder)
     os.makedirs(final_output_dir, exist_ok=True)
 
-    logger.info("Processing file: %s (%% folder: %s)", filename, percentage_folder)
+    print(f"Processing file: {filename} (% folder: {percentage_folder})")
 
     # 2) Load raw signals (ACC Z, load-cell, EMG) + full raw for XYZ ACC
 
@@ -92,9 +77,6 @@ def run_pipeline(
     acc_x, acc_y, acc_z = transfer_acc(x_data, y_data, z_data, calib_file)
 
     # Convert load-cell to calibrated quantity (project-specific).
-    # If `transfer_weight` returns mass (kg), ensure `compute_power` handles it
-    # (either by multiplying g inside, or adjust here). If it returns force (N),
-    # the naming "force" below is correct.
     force = transfer_weight(loadcell_signal)
 
     # 3) Filtering and smoothing (ACC Z, load-cell)
@@ -147,8 +129,8 @@ def run_pipeline(
         min_eccentric_duration=0.60,
     )
 
-    logger.info("Detected rep starts: %s", ", ".join(f"{time[i]:.2f}s" for i in rep_starts))
-    logger.info("Detected conc. ends: %s", ", ".join(f"{time[i]:.2f}s" for i in concentric_ends))
+    print("Detected rep starts: " + ", ".join(f"{time[i]:.2f}s" for i in rep_starts))
+    print("Detected conc. ends: " + ", ".join(f"{time[i]:.2f}s" for i in concentric_ends))
 
     phase_pairs = get_phase_index_pairs(
         rep_starts=rep_starts, con_starts=concentric_starts, con_ends=concentric_ends
@@ -190,22 +172,10 @@ def run_pipeline(
     emg_filtered_cut = crop_results["emg_filtered_cut"]
     emg_cut = crop_results["emg_cut"]
 
-    logger.info(
-        "CUT concentric starts: %s",
-        ", ".join(f"{time_cut[i]:.2f}s" for i in concentric_starts_cut),
-    )
-    logger.info(
-        "CUT concentric ends:   %s",
-        ", ".join(f"{time_cut[i]:.2f}s" for i in concentric_ends_cut),
-    )
-    logger.info(
-        "CUT rep starts:        %s",
-        ", ".join(f"{time_cut[i]:.2f}s" for i in starts_cut),
-    )
-    logger.info(
-        "CUT rep ends:          %s",
-        ", ".join(f"{time_cut[i]:.2f}s" for i in ends_cut),
-    )
+    print("CUT concentric starts: " + ", ".join(f"{time_cut[i]:.2f}s" for i in concentric_starts_cut))
+    print("CUT concentric ends:   " + ", ".join(f"{time_cut[i]:.2f}s" for i in concentric_ends_cut))
+    print("CUT rep starts:        " + ", ".join(f"{time_cut[i]:.2f}s" for i in starts_cut))
+    print("CUT rep ends:          " + ", ".join(f"{time_cut[i]:.2f}s" for i in ends_cut))
 
     # 9) Plots: concentric-only and full phases (QA/diagnostics)
     plot_concentric_phase_signals_seasonal(
@@ -263,10 +233,11 @@ def run_pipeline(
             np.linspace(0, 100, normalized_curves.shape[1])
             for _ in range(normalized_curves.shape[0])
         ]
-        logger.info(
-            "Peak positions for %s: %s",
-            signal_name,
-            ", ".join(f"rep{i+1}={p:.1f}%%" for i, p in enumerate(peak_percents)),
+        print(
+            "Peak positions for "
+            + signal_name
+            + ": "
+            + ", ".join(f"rep{i+1}={p:.1f}%" for i, p in enumerate(peak_percents))
         )
         plot_normalized_signal_per_repetition(
             relative_time_percent=time_percents,
@@ -301,11 +272,11 @@ def run_pipeline(
     ]
 
     for i, v in enumerate(max_velocities_raw):
-        logger.info("Max velocity rep %d: %.2f m/s", i + 1, v)
+        print(f"Max velocity rep {i + 1}: {v:.2f} m/s")
     for i, p in enumerate(max_powers):
-        logger.info("Max power    rep %d: %.2f W", i + 1, p)
+        print(f"Max power    rep {i + 1}: {p:.2f} W")
     if max_powers:
-        logger.info("Highest max power across reps: %.2f W", max(max_powers))
+        print(f"Highest max power across reps: {max(max_powers):.2f} W")
 
     plot_bar_max_power(
         max_powers=max_powers,
@@ -324,7 +295,7 @@ def run_pipeline(
     velocity_corr_matrix = compute_correlation_matrix(velocity_segments)
     correlation_pairs = extract_correlation_pairs(velocity_corr_matrix)
     for a, b, c in correlation_pairs:
-        logger.info("Velocity corr rep %d vs %d: %.3f", a, b, c)
+        print(f"Velocity corr rep {a} vs {b}: {c:.3f}")
 
     acc_segments = normalize_segments(
         signal=acc_cut,
@@ -335,7 +306,7 @@ def run_pipeline(
     acc_corr_matrix = compute_correlation_matrix(acc_segments)
     acc_correlation_pairs = extract_correlation_pairs(acc_corr_matrix)
     for a, b, c in acc_correlation_pairs:
-        logger.info("ACC corr      rep %d vs %d: %.3f", a, b, c)
+        print(f"ACC corr      rep {a} vs {b}: {c:.3f}")
 
     # Mean ± SD of power over full phases (note: uses starts_cut/ends_cut intentionally)
     normalized_power_segments = normalize_segments(
@@ -405,7 +376,7 @@ def run_pipeline(
         concentric_starts=concentric_starts_cut,
         time_vector=time_cut,
     )
-    logger.info("Detected %d EMG onsets.", len(estopt_onset_indices))
+    print(f"Detected {len(estopt_onset_indices)} EMG onsets.")
 
     # Onset → peak POWER delay (s), measured against power_filtered_cut
     emg_onset_to_power_peak_delays = compute_emg_onset_to_power_peak_delay(
