@@ -1,391 +1,262 @@
 """
-Batch runner and CLI for processing participant folders.
-
-This module orchestrates:
-  1) Batch runs over a Participants folder tree (participant → session → stimulus → Files/*.txt).
-  2) Single-file processing for quick checks.
-  3) CSV export of all aggregated per-repetition metrics (one CSV per participant/session/stimulus/exercise).
-
+Batch and single-file runner for the published ASTROPOWER dataset.
+Expected tree: Dataset/ID{1,...,24}/Session_{1,2,3}}/{ABF,GM}/idx_relativeload_mp_{bp,squat}_{abf,gm}.txt
 Notes:
 - Uses 'main_pipeline.run_pipeline(...)' to compute all metrics and generate plots.
 - Aggregates results into 'results_per_participant' (in-memory) and exports to CSV at the end.
 - CSV separator is ';' to be Excel-friendly in locales where ',' is the decimal separator.
-- Logging is used for progress/warnings/errors; prints são usados apenas no CLI interativo.
-"""
+- Logging is used for progress/warnings/errors; prints are only used  for interactive CLI .
+Analysis products are written to OUTPUT_ROOT, not into Dataset.
 
-import os
+
+
+"""
+from __future__ import annotations
+
 import logging
-from typing import Dict, List
+import re
 from collections import defaultdict
+from pathlib import Path
+from typing import Dict, List
+
 import numpy as np
 import pandas as pd
-import traceback
 
 from main_pipeline import run_pipeline
 
-
-#Configuration & global stores
-
-# Base directory where participant/session/stimulus folders live.
-BASE_PATH = "C:/Users/beatr/Documents/UNIVERSIDADE/5ºANO MIEB/TESE/Recolhas/Participants"
+# Adjust only these two paths for your machine.
+BASE_PATH = Path(r"C:\Users\Dania\Documents\ASTROPOWER\Mestrados\Beatriz_Guerreiro\Dados_Beatriz")
+OUTPUT_ROOT = BASE_PATH.parent / "Dataset_Results"
 STIMULI = ("ABF", "GM")
 
-# Global stores (populated during runs)
+logger = logging.getLogger(__name__)
 participants_data: Dict[str, dict] = {}
 results_per_participant: Dict[str, List[dict]] = {}
 
-logger = logging.getLogger(__name__)
+# Example: id3_30_mp_squat_gm.txt (participant identifiers may contain hyphens).
+FILE_RE = re.compile(
+    r"^(?P<id>.+)_(?P<load>\d+)_mp_(?P<exercise>bp|squat)_(?P<stimulus>abf|gm)\.txt$",
+    flags=re.IGNORECASE,
+)
 
 
-# Batch processing
+def parse_exercise_filename(filename: str, participant_id: str, stimulus: str):
+    """Return (exercise_name, relative_load) if filename belongs to folder; else None."""
+    match = FILE_RE.fullmatch(filename)
+    if not match:
+        return None
+    if match.group("id").casefold() != participant_id.casefold():
+        logger.warning("Filename participant ID does not match folder: %s", filename)
+        return None
+    if match.group("stimulus").casefold() != stimulus.casefold():
+        logger.warning("Filename condition does not match folder: %s", filename)
+        return None
+    exercise = "bench_press" if match.group("exercise").casefold() == "bp" else "squat"
+    return exercise, int(match.group("load"))
+
+
+def iter_exercise_files(condition_path: Path, participant_id: str, stimulus: str):
+    """Yield only recognized exercise text files; skip other session measurements."""
+    if not condition_path.is_dir():
+        logger.warning("Condition directory missing: %s", condition_path)
+        return
+    for path in sorted(condition_path.iterdir()):
+        if not path.is_file() or path.suffix.casefold() != ".txt":
+            continue
+        parsed = parse_exercise_filename(path.name, participant_id, stimulus)
+        if parsed:
+            yield path, *parsed
+        else:
+            logger.info("Skipping unrecognized exercise filename: %s", path.name)
+
+
+def build_result_row(results: dict, participant_id: str, session_name: str,
+                     stimulus: str, exercise_type: str, filename: str,
+                     relative_load: int) -> dict:
+    """Preserve the original CSV metrics and column names for compatibility."""
+    row = dict(participant_id=participant_id, session=session_name,
+               stimulus=stimulus, exercise=exercise_type, filename=filename,
+               percentage_1RM=relative_load)
+
+    metrics = {
+        "max_powers": "max_power",
+        "max_velocities": "max_velocity",
+        "power_indices": "power_index",
+        "velocity_indices": "velocity_index",
+        "dif_vel_power": "dif_vel_power",
+        "max_rpd": "max_rpd",
+        "total_slope_power": "power_total_slope",
+        "emg_onset_power_peak": "emg_onset_to_power_peak",
+        "emg_rise_time": "emg_rise_time",
+        "emg_rise_slope": "emg_rise_slope",
+        "median_freq": "emg_median_freq",
+    }
+    for source_key, column_prefix in metrics.items():
+        for i, value in enumerate(results.get(source_key, []) or [], start=1):
+            row[f"{column_prefix}_rep_{i}"] = value
+
+    phase = results.get("phase_indices", {}) or {}
+    for i, (rep_start, con_end) in enumerate(phase.get("rep_con_pairs", []), start=1):
+        row[f"rep_start_rep_{i}"] = rep_start
+        row[f"con_end_rep_{i}"] = con_end
+    for i, (con_start, con_end) in enumerate(phase.get("con_phase_pairs", []), start=1):
+        row[f"con_start_rep_{i}"] = con_start
+        row[f"con_end_rep_{i}"] = con_end
+
+    for signal_name, peaks in (results.get("peak_positions", {}) or {}).items():
+        for i, pos in enumerate(peaks, start=1):
+            row[f"peak_{signal_name.lower()}_rep_{i}"] = pos
+
+    for signal_name, pairs in (results.get("correlation_pairs", {}) or {}).items():
+        for rep_a, rep_b, corr in pairs:
+            row[f"corr_{signal_name.lower()}_{rep_a}_{rep_b}"] = corr
+
+    for i, slopes in enumerate(results.get("wind_slope_power", []) or [], start=1):
+        values = np.asarray(slopes, dtype=float) if slopes is not None else np.array([])
+        row[f"power_window_slope_mean_rep_{i}"] = (
+            float(np.nanmean(values)) if values.size and np.isfinite(values).any()
+            else np.nan
+        )
+    return row
+
+
+def process_exercise_file(file_path: Path, participant_id: str, session_name: str,
+                          stimulus: str, exercise_type: str, expected_load: int,
+                          save_plots: bool = True, show_plots: bool = False,
+                          output_root: Path = OUTPUT_ROOT) -> bool:
+    plots_dir = Path(output_root) / participant_id / session_name / stimulus / "Plots" / exercise_type
+    try:
+        logger.info("Processing %s", file_path)
+        results, pipeline_load = run_pipeline(
+            str(file_path), str(plots_dir), save_plots=save_plots,
+            show_plots=show_plots,
+        )
+        if results is None:
+            logger.warning("No results for %s", file_path)
+            return False
+        if pipeline_load != expected_load:
+            raise ValueError(
+                f"Pipeline load ({pipeline_load}) differs from filename load "
+                f"({expected_load}) for {file_path.name}. Update main_pipeline.py "
+                f"as instructed."
+            )
+        participants_data.setdefault(participant_id, {}).setdefault(session_name, {}) \
+            .setdefault(stimulus, {}).setdefault(exercise_type, []).append(file_path.name)
+        row = build_result_row(results, participant_id, session_name, stimulus,
+                               exercise_type, file_path.name, expected_load)
+        results_per_participant.setdefault(participant_id, []).append(row)
+        return True
+    except Exception:
+        logger.exception("Error processing %s", file_path)
+        return False
+
+
 def run_batch_processing(session_name: str = "Session_1",
-                         base_path: str = BASE_PATH,
-                         stimuli=STIMULI) -> None:
-    """Process all *.txt files for all participants for a given session.
-
-    The function:
-      - walks the `base_path` for participant IDs,
-      - enters the given `session_name`,
-      - iterates stimuli (e.g., "ABF", "GM"),
-      - runs pipeline on each .txt file, and
-      - aggregates results into `results_per_participant`.
-    """
-    for participant_folder in os.listdir(base_path):
-        participant_path = os.path.join(base_path, participant_folder)
-        if not os.path.isdir(participant_path):
+                         base_path: str | Path = BASE_PATH,
+                         stimuli=STIMULI,
+                         output_root: str | Path = OUTPUT_ROOT,
+                         save_plots: bool = True,
+                         show_plots: bool = False) -> None:
+    root = Path(base_path)
+    if not root.is_dir():
+        raise FileNotFoundError(f"Dataset directory not found: {root}")
+    for participant_dir in sorted(root.iterdir()):
+        if not participant_dir.is_dir():
             continue
-
-        session_path = os.path.join(participant_path, session_name)
-        if not os.path.exists(session_path):
-            logger.warning("Skipping %s: No %s folder.", participant_folder, session_name)
+        session_dir = participant_dir / session_name
+        if not session_dir.is_dir():
+            logger.warning("Skipping %s: no %s", participant_dir.name, session_name)
             continue
-
         for stimulus in stimuli:
-            files_dir = os.path.join(session_path, stimulus, "Files")
-            plots_base_dir = os.path.join(session_path, stimulus, "Plots")
-
-            if not os.path.exists(files_dir):
-                logger.warning("Skipping %s - %s: No Files directory.", participant_folder, stimulus)
-                continue
-
-            txt_files = [f for f in os.listdir(files_dir) if f.endswith(".txt")]
-            if not txt_files:
-                logger.info("No .txt files in %s", files_dir)
-                continue
-
-            # Optional local store by percentage (kept for future summaries)
-            local_power_by_percentage = {
-                "ABF": {"bench_press": defaultdict(list), "squat": defaultdict(list)},
-                "GM": {"bench_press": defaultdict(list), "squat": defaultdict(list)},
-            }
-
-            for filename in txt_files:
-                try:
-                    exercise_type = "bench_press" if "bp" in filename.lower() else "squat"
-                    file_path = os.path.join(files_dir, filename)
-                    output_dir = os.path.join(plots_base_dir, exercise_type)
-
-                    logger.info(
-                        "Processing %s (%s | %s | %s | %s)",
-                        filename, participant_folder, session_name, stimulus, exercise_type
-                    )
-
-                    results, percentage = run_pipeline(file_path, output_dir)
-
-                    # Keep best power per %1RM (optional accumulator)
-                    if results is not None and percentage is not None and results.get("max_powers"):
-                        try:
-                            max_power = max(results["max_powers"])
-                            local_power_by_percentage[stimulus][exercise_type][percentage].append(float(max_power))
-                        except Exception:
-                            # Não é crítico para o fluxo
-                            logger.debug("Could not update local_power_by_percentage for %s", filename)
-
-                    # Track processed files
-                    participants_data.setdefault(participant_folder, {}) \
-                        .setdefault(session_name, {}) \
-                        .setdefault(stimulus, {}) \
-                        .setdefault(exercise_type, []).append(filename)
-
-                    # Build a flat row with all per-repetition metrics
-                    row = {
-                        "participant_id": participant_folder,
-                        "session": session_name,
-                        "stimulus": stimulus,
-                        "exercise": exercise_type,
-                        "filename": filename,
-                        "percentage_1RM": percentage,
-                    }
-
-                    # Max power per repetition
-                    for i, p in enumerate(results.get("max_powers", [])):
-                        row[f"max_power_rep_{i + 1}"] = p
-
-                    # Max velocity (raw at filtered power peaks) per repetition
-                    for i, v in enumerate(results.get("max_velocities", [])):
-                        row[f"max_velocity_rep_{i + 1}"] = v
-
-                    # Indices (cut reference)
-                    for i, idx in enumerate(results.get("power_indices", [])):
-                        row[f"power_index_rep_{i + 1}"] = idx
-                    for i, idx in enumerate(results.get("velocity_indices", [])):
-                        row[f"velocity_index_rep_{i + 1}"] = idx
-
-                    # Time difference between velocity-peak and power-peak (s)
-                    for i, dt in enumerate(results.get("dif_vel_power", [])):
-                        row[f"dif_vel_power_rep_{i + 1}"] = dt
-
-                    # Phase indices (rep start / concentric start/end)
-                    phase = results.get("phase_indices", {})
-                    for i, (rep_start, con_end) in enumerate(phase.get("rep_con_pairs", [])):
-                        row[f"rep_start_rep_{i + 1}"] = rep_start
-                        row[f"con_end_rep_{i + 1}"] = con_end
-                    for i, (con_start, con_end) in enumerate(phase.get("con_phase_pairs", [])):
-                        row[f"con_start_rep_{i + 1}"] = con_start
-                        row[f"con_end_rep_{i + 1}"] = con_end
-
-                    # Peak positions as % of concentric phase (Velocity, Power)
-                    for signal_name, peaks in results.get("peak_positions", {}).items():
-                        for i, pos in enumerate(peaks):
-                            row[f"peak_{signal_name.lower()}_rep_{i + 1}"] = pos
-
-                    # Between-repetition correlation pairs
-                    for signal_name, corr_pairs in results.get("correlation_pairs", {}).items():
-                        for repA, repB, corr in corr_pairs:
-                            # repA/repB podem ser strings ("Rep 1"), por isso usamos diretamente como coluna
-                            row[f"corr_{signal_name.lower()}_{repA}_{repB}"] = corr
-
-                    # RPD (rate of power development) per repetition
-                    for i, r in enumerate(results.get("max_rpd", [])):
-                        row[f"max_rpd_rep_{i + 1}"] = r
-
-                    # Power slopes (total slope; mean of windowed slopes)
-                    for i, s in enumerate(results.get("total_slope_power", [])):
-                        row[f"power_total_slope_rep_{i + 1}"] = s
-                    wind_slopes = results.get("wind_slope_power", [])
-                    for i, slopes in enumerate(wind_slopes):
-                        try:
-                            mean_slope = float(np.nanmean(slopes)) if hasattr(slopes, "__len__") and len(slopes) > 0 else np.nan
-                        except Exception:
-                            mean_slope = np.nan
-                        row[f"power_window_slope_mean_rep_{i + 1}"] = mean_slope
-
-                    # EMG metrics (times in seconds, slopes in mV^2/s)
-                    for i, val in enumerate(results.get("emg_onset_power_peak", [])):
-                        row[f"emg_onset_to_power_peak_rep_{i + 1}"] = val
-                    for i, val in enumerate(results.get("emg_rise_time", [])):
-                        row[f"emg_rise_time_rep_{i + 1}"] = val
-                    for i, val in enumerate(results.get("emg_rise_slope", [])):
-                        row[f"emg_rise_slope_rep_{i + 1}"] = val
-                    for i, val in enumerate(results.get("median_freq", [])):
-                        row[f"emg_median_freq_rep_{i + 1}"] = val
-
-                    # Append the row
-                    results_per_participant.setdefault(participant_folder, []).append(row)
-
-                except Exception as e:
-                    logger.error("Error processing %s: %s", filename, e)
-                    traceback.print_exc()
+            condition_dir = session_dir / stimulus
+            for file_path, exercise, load in iter_exercise_files(
+                condition_dir, participant_dir.name, stimulus
+            ):
+                process_exercise_file(file_path, participant_dir.name, session_name,
+                                      stimulus, exercise, load, save_plots,
+                                      show_plots, Path(output_root))
 
 
-
-# Single-file processing
-def process_single_file(participant_id: str,
-                        session_name: str,
-                        stimulus: str,
-                        filename: str,
-                        save_plots: bool = True,
+def process_single_file(participant_id: str, session_name: str, stimulus: str,
+                        filename: str, save_plots: bool = True,
                         show_plots: bool = False,
-                        base_path: str = BASE_PATH) -> None:
-    """Process a single file for a given participant/session/stimulus."""
-
-    file_path = os.path.join(base_path, participant_id, session_name, stimulus, "Files", filename)
-    if not os.path.exists(file_path):
+                        base_path: str | Path = BASE_PATH,
+                        output_root: str | Path = OUTPUT_ROOT) -> None:
+    stimulus = stimulus.upper()
+    if stimulus not in STIMULI:
+        raise ValueError(f"Unrecognized condition: {stimulus}")
+    parsed = parse_exercise_filename(filename, participant_id, stimulus)
+    if parsed is None:
+        raise ValueError(f"Unrecognized filename: {filename}")
+    file_path = Path(base_path) / participant_id / session_name / stimulus / filename
+    if not file_path.is_file():
         logger.error("File not found: %s", file_path)
         return
-
-    exercise_type = "bench_press" if "bp" in filename.lower() else "squat"
-    output_dir = os.path.join(base_path, participant_id, session_name, stimulus, "Plots", exercise_type)
-
-    logger.info("Processing single file: %s", filename)
-    try:
-        results, percentage = run_pipeline(file_path, output_dir, save_plots=save_plots, show_plots=show_plots)
-        if results is None or percentage is None:
-            logger.warning("No valid results returned for %s", filename)
-            return
-
-        # Track processed file
-        participants_data.setdefault(participant_id, {}) \
-            .setdefault(session_name, {}) \
-            .setdefault(stimulus, {}) \
-            .setdefault(exercise_type, []).append(filename)
-
-        # Build a row identical to the batch path
-        row = {
-            "participant_id": participant_id,
-            "session": session_name,
-            "stimulus": stimulus,
-            "exercise": exercise_type,
-            "filename": filename,
-            "percentage_1RM": percentage,
-        }
-
-        for i, p in enumerate(results.get("max_powers", [])):
-            row[f"max_power_rep_{i + 1}"] = p
-        for i, v in enumerate(results.get("max_velocities", [])):
-            row[f"max_velocity_rep_{i + 1}"] = v
-        for i, idx in enumerate(results.get("power_indices", [])):
-            row[f"power_index_rep_{i + 1}"] = idx
-        for i, idx in enumerate(results.get("velocity_indices", [])):
-            row[f"velocity_index_rep_{i + 1}"] = idx
-        for i, dt in enumerate(results.get("dif_vel_power", [])):
-            row[f"dif_vel_power_rep_{i + 1}"] = dt
-
-        phase = results.get("phase_indices", {})
-        for i, (rep_start, con_end) in enumerate(phase.get("rep_con_pairs", [])):
-            row[f"rep_start_rep_{i + 1}"] = rep_start
-            row[f"con_end_rep_{i + 1}"] = con_end
-        for i, (con_start, con_end) in enumerate(phase.get("con_phase_pairs", [])):
-            row[f"con_start_rep_{i + 1}"] = con_start
-            row[f"con_end_rep_{i + 1}"] = con_end
-
-        for signal_name, peaks in results.get("peak_positions", {}).items():
-            for i, pos in enumerate(peaks):
-                row[f"peak_{signal_name.lower()}_rep_{i + 1}"] = pos
-
-        for signal_name, corr_pairs in results.get("correlation_pairs", {}).items():
-            for repA, repB, corr in corr_pairs:
-                row[f"corr_{signal_name.lower()}_{repA}_{repB}"] = corr
-
-        for i, r in enumerate(results.get("max_rpd", [])):
-            row[f"max_rpd_rep_{i + 1}"] = r
-
-        for i, s in enumerate(results.get("total_slope_power", [])):
-            row[f"power_total_slope_rep_{i + 1}"] = s
-
-        wind_slopes = results.get("wind_slope_power", [])
-        for i, slopes in enumerate(wind_slopes):
-            try:
-                mean_slope = float(np.nanmean(slopes)) if hasattr(slopes, "__len__") and len(slopes) > 0 else np.nan
-            except Exception:
-                mean_slope = np.nan
-            row[f"power_window_slope_mean_rep_{i + 1}"] = mean_slope
-
-        for i, val in enumerate(results.get("emg_onset_power_peak", [])):
-            row[f"emg_onset_to_power_peak_rep_{i + 1}"] = val
-        for i, val in enumerate(results.get("emg_rise_time", [])):
-            row[f"emg_rise_time_rep_{i + 1}"] = val
-        for i, val in enumerate(results.get("emg_rise_slope", [])):
-            row[f"emg_rise_slope_rep_{i + 1}"] = val
-        for i, val in enumerate(results.get("median_freq", [])):
-            row[f"emg_median_freq_rep_{i + 1}"] = val
-
-        results_per_participant.setdefault(participant_id, []).append(row)
-        logger.info("Finished processing %s", filename)
-
-    except Exception as e:
-        logger.error("Error processing %s: %s", filename, e)
-        traceback.print_exc()
+    exercise, load = parsed
+    process_exercise_file(file_path, participant_id, session_name, stimulus,
+                          exercise, load, save_plots, show_plots, Path(output_root))
 
 
-
-# CSV export
-def export_results_to_csv(base_path: str = BASE_PATH, sep: str = ';') -> None:
-    """Export one CSV per participant/session/stimulus/exercise, Excel-friendly.
-
-    The CSV filename pattern is:
-      {participant}_{session}_{stimulus}_{exercise}_results.csv
-
-    Args:
-      base_path: Root folder where CSVs will be saved (inside each participant/session/stimulus).
-      sep: Field separator; ';' is recommended for Excel in locales that use ',' as decimal.
-    """
+def export_results_to_csv(output_root: str | Path = OUTPUT_ROOT,
+                          sep: str = ";") -> None:
+    """Write one CSV per participant/session/condition/exercise; overwrite on export."""
     for participant_id, rows in results_per_participant.items():
+        if not rows:
+            continue
         df = pd.DataFrame(rows)
-
-        # Group and write one CSV per (session, stimulus, exercise)
-        grouped = df.groupby(["session", "stimulus", "exercise"], dropna=False)
-
-        for (session, stimulus, exercise), group_df in grouped:
-            save_dir = os.path.join(base_path, participant_id, session, stimulus)
-            os.makedirs(save_dir, exist_ok=True)
-
-            filename = f"{participant_id}_{session}_{stimulus}_{exercise}_results.csv"
-            save_path = os.path.join(save_dir, filename)
-
-            # Append if file exists; write header only once
-            group_df.to_csv(
-                save_path,
-                mode="a",
-                header=not os.path.exists(save_path),
-                index=False,
-                sep=sep,
-                encoding="utf-8"
+        for (session, stimulus, exercise), group in df.groupby(
+            ["session", "stimulus", "exercise"], dropna=False
+        ):
+            save_dir = Path(output_root) / participant_id / session / stimulus
+            save_dir.mkdir(parents=True, exist_ok=True)
+            file_path = save_dir / f"{participant_id}_{session}_{stimulus}_{exercise}_results.csv"
+            # Prevent duplicated records when rerunning within the same process.
+            group = group.drop_duplicates(subset=["filename"], keep="last")
+            group.sort_values(["percentage_1RM", "filename"]).to_csv(
+                file_path, sep=sep, index=False, encoding="utf-8-sig"
             )
-            logger.info("Saved CSV: %s", save_path)
+            logger.info("Saved CSV: %s", file_path)
 
 
-# CLI
 if __name__ == "__main__":
-    # Basic logging setup for CLI usage; adjust level as needed
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
-        datefmt="%H:%M:%S",
-    )
-
-    print("Choose mode:")
-    print("1 - Run all participants (batch)")
-    print("2 - Run a specific file (single)")
+    logging.basicConfig(level=logging.INFO,
+                        format="%(asctime)s | %(levelname)s | %(message)s")
+    print(f"Dataset: {BASE_PATH}\nResults: {OUTPUT_ROOT}")
+    print("1 - Batch process a session (all participants)")
+    print("2 - Process selected files")
     choice = input("Enter choice (1 or 2): ").strip()
 
     if choice == "1":
-        session = input("Enter session name (e.g., Session_1 or Session_2): ").strip()
+        session = input("Session (e.g. Session_1, Session_2, Session_3): ").strip()
         run_batch_processing(session_name=session)
-        export_results_to_csv()  # write CSVs after batch
-
+        export_results_to_csv()
     elif choice == "2":
-        participant_id = input("Enter participant ID (e.g., ID3): ").strip()
-        session_name = input("Enter session name (e.g., Session_2): ").strip()
-        stimulus = input("Enter stimulus (ABF or GM): ").strip()
-
-        save_choice = input("Do you want to save the plots? (y/n): ").strip().lower()
-        show_choice = input("Do you want to display the plots? (y/n): ").strip().lower()
-        save_plots = (save_choice == "y")
-        show_plots = (show_choice == "y")
-
-        files_dir = os.path.join(BASE_PATH, participant_id, session_name, stimulus, "Files")
-        if not os.path.exists(files_dir):
-            print(f"Directory not found: {files_dir}")
+        participant_id = input("Participant ID (e.g. ID3): ").strip()
+        session_name = input("Session (e.g. Session_2): ").strip()
+        stimulus = input("Condition (ABF or GM): ").strip().upper()
+        save_plots = input("Save plots? (y/n): ").strip().lower() == "y"
+        show_plots = input("Display plots? (y/n): ").strip().lower() == "y"
+        condition_dir = BASE_PATH / participant_id / session_name / stimulus
+        available = list(iter_exercise_files(condition_dir, participant_id, stimulus))
+        if not available:
+            print("No matching exercise .txt files found.")
         else:
-            txt_files = [f for f in os.listdir(files_dir) if f.endswith(".txt")]
-            if not txt_files:
-                print("No .txt files found.")
-            else:
-                print("\nAvailable files:")
-                for idx, file in enumerate(txt_files):
-                    print(f"[{idx}] {file}")
-
-                selection = input("Enter the indices of the files you want to run (e.g., 0,2,3): ").strip()
-                try:
-                    selected_indices = [int(i.strip()) for i in selection.split(",")]
-                except ValueError:
-                    print("Invalid input.")
-                    raise SystemExit(1)
-
-                for idx in selected_indices:
-                    if 0 <= idx < len(txt_files):
-                        filename = txt_files[idx]
-                        process_single_file(
-                            participant_id, session_name, stimulus, filename,
-                            save_plots=save_plots, show_plots=show_plots
-                        )
-                    else:
-                        print(f"Invalid index: {idx}")
-
-                # Optionally export CSVs for the processed single files too
-                export_now = input("Export CSV for these results now? (y/n): ").strip().lower()
-                if export_now == "y":
-                    export_results_to_csv()
+            print("\nAvailable files:")
+            for i, (path, exercise, load) in enumerate(available):
+                print(f"[{i}] {path.name} ({exercise}, {load}% 1RM)")
+            selected = input("Indices to process (e.g. 0,2,3): ").strip()
+            try:
+                indices = [int(i.strip()) for i in selected.split(",")]
+            except ValueError:
+                raise SystemExit("Invalid selection")
+            for i in dict.fromkeys(indices):
+                if 0 <= i < len(available):
+                    path, _, _ = available[i]
+                    process_single_file(participant_id, session_name, stimulus,
+                                        path.name, save_plots, show_plots)
+                else:
+                    print(f"Invalid index: {i}")
+            if input("Export CSV? (y/n): ").strip().lower() == "y":
+                export_results_to_csv()
     else:
-        print("Invalid choice. Exiting.")
+        print("Invalid choice")

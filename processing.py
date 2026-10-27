@@ -34,7 +34,7 @@ def get_acc_calibration(calib_file_path: str) -> tuple:
     Returns:
         tuple: (X_min, X_max, Y_min, Y_max, Z_min, Z_max)
     """
-    calib_data = np.loadtxt(calib_file_path)
+    calib_data = np.loadtxt(calib_file_path, skiprows=1)
 
     C_X_min, C_X_max = np.min(calib_data[:, 2]), np.max(calib_data[:, 2])
     C_Y_min, C_Y_max = np.min(calib_data[:, 3]), np.max(calib_data[:, 3])
