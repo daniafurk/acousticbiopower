@@ -88,7 +88,7 @@ def run_pipeline(
     z_data = raw_data[:, 4]  # ACCz
 
     # Calibration of ACC axes (→ m/s²) with a local calibration file
-    calib_file = r"C:\Users\beatr\Documents\UNIVERSIDADE\5ºANO MIEB\TESE\Recolhas\Acc_calib_new.txt"
+    calib_file = r"Acc_calib.txt"
     acc_x, acc_y, acc_z = transfer_acc(x_data, y_data, z_data, calib_file)
 
     # Convert load-cell to calibrated quantity (project-specific).
