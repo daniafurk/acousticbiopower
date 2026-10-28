@@ -1,5 +1,5 @@
 """
-Contains signal processing functions for filtering, calibration, integration, and smoothing.
+Contains signal processing functions for unit conversion, filtering, calibration, integration, and smoothing.
 Includes Butterworth bandpass/lowpass filters, Gaussian smoothing, RMS/envelope generation, and
 spline fitting for acceleration. Also performs integration to derive velocity and force from raw signals.
 """

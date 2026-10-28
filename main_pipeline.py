@@ -1,5 +1,5 @@
 """
-Single-exercise processing pipeline for standardized published dataset.
+Single file processing pipeline for standardized published dataset.
 
 Input: one header row, followed by eight numeric columns:
 Nseq LOADCELL ACCX ACCY ACCZ EMGA EMGL ECG
@@ -49,8 +49,8 @@ def run_pipeline(file_path: str, output_dir: str,
     x_data, y_data, z_data = raw_data[:, 2], raw_data[:, 3], raw_data[:, 4]
 
     # Calibration of ACC axes (→ m/s²) with a local calibration file
-    calib_file = r"C:\Users\Dania\Documents\ASTROPOWER\Mestrados\Beatriz_Guerreiro\Dados_Beatriz\Acc_calib.txt"
-    acc_x, acc_y, acc_z = transfer_acc(x_data, y_data, z_data, calib_file)
+    CALIB_FILE = r"C:\Users\Dania\Documents\ASTROPOWER\Mestrados\Beatriz_Guerreiro\Dados_Beatriz\Acc_calib.txt"
+    acc_x, acc_y, acc_z = transfer_acc(x_data, y_data, z_data, CALIB_FILE)
     force = transfer_weight(loadcell_signal)
 
     # Filtering accelerometer and force signals
