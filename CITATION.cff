@@ -1,0 +1,12 @@
+cff-version: 1.2.0
+message: "If you use this software, please cite this repository."
+type: software
+title: "Muscle-Power_Analysis_Processing-Algorithms-and-Metrics-Extraction"
+
+authors:
+  - family-names: "Guerreiro"
+    given-names: "Beatriz"
+  - family-names: "Furk"
+    given-names: "Dania"
+
+repository-code: "https://github.com/OWNER/REPOSITORY"
