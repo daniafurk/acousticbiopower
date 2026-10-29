@@ -214,15 +214,14 @@ The dataset includes `files_with_missing_values.xlsx`, which identifies recordin
 - Maximum length of a consecutive sequence of missing samples.
 - Number of missing-data blocks, defined as sequences of at least two consecutive missing samples.
 
-### Dataset inclusion criteria
+### Dataset Quality and Exclusion Criteria
+The recordings included in the dataset are provided in their original, unprocessed format, without interpolation or correction of missing values. This allows users to independently select and apply missing-data handling strategies according to their analytical objectives.
 
-As specified for the dataset preparation, files whose longest consecutive missing-data segment exceeded **10% of the recording length** were excluded from the published collection. The retained recordings are distributed **without interpolation or correction** of remaining missing values, allowing other researchers to choose their own approach.
+### Missing-Value Handling in the Processing Pipeline
+The provided Python pipeline automatically identifies and removes rows containing NaN or infinite values before signal processing. Consequently, only samples with valid values across all recorded channels are retained for subsequent analyses. If the concentric phases cannot be correctly detected, no metrics are extracted for that file.
 
-### Processing-pipeline policy
+Users should be aware that removing missing samples may introduce temporal discontinuities and affect time-dependent metrics, including movement velocity, repetition segmentation, EMG activation timing, and power development.
 
-The updated loader rejects an entire recording if any channel contains `NaN` or an infinite value. No individual rows are removed or interpolated. Other recordings continue to be processed. If valid movement phases cannot be detected, metrics may not be produced for that recording.
-
-**Important:** This behavior requires the revised `import_data.py` supplied with this README; earlier versions of the loader removed non-finite rows.
 
 ## Citation
 
