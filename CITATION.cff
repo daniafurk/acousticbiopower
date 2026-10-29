@@ -1,12 +1,16 @@
 cff-version: 1.2.0
 message: "If you use this software, please cite this repository."
 type: software
-title: "Muscle-Power_Analysis_Processing-Algorithms-and-Metrics-Extraction"
+title: "acousticbiopower"
 
 authors:
   - family-names: "Guerreiro"
     given-names: "Beatriz"
   - family-names: "Furk"
     given-names: "Dania"
+  - family-names: "Silva"
+    given-names: "Luís"
+  - family-names: "Gamboa"
+    given-names: "Hugo"
 
-repository-code: "https://github.com/OWNER/REPOSITORY"
+repository-code: "https://github.com/daniafurk/acousticbiopower"
