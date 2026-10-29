@@ -237,8 +237,8 @@ Contributors:
 - Luís Silva
 - Hugo Gamboa
 
-**Repository:** ASTROPOWER — Biomechanical Signal Processing and Analysis  
-**GitHub:** `[Repository URL](https://github.com/daniafurk/acousticbiopower.git)`
+**Repository:** Acoustic BioPower — Signal Processing and Analysis  
+**GitHub:** [Repository URL](https://github.com/daniafurk/acousticbiopower.git)
 
 ### Associated dataset
 
