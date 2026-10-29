@@ -4,9 +4,11 @@ __pycache__/
 *.class
 
 # IDE
-.vscode/
 .idea/
 
 # OS
 .DS_Store
 Thumbs.db
+
+# Ignore virtual environments
+venv/
