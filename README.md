@@ -1,4 +1,4 @@
-# Acoustic BioPower — Biomechanical Signal Processing and Analysis
+# Acoustic BioPower — Signal Processing and Analysis
 
 ## Project Overview
 
