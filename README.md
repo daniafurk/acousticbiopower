@@ -2,7 +2,7 @@
 
 ## Project Overview
 
-This repository contains the Python scripts developed to process and analyse kinetic, kinematic, and electromyographic recordings collected during the ASTROPOWER project's pilot study. The [Acoustic BioPower Dataset](https://doi.org/10.6084/m9.figshare.32090722) is available on Figshare, and the processing pipeline was developed as part of [Beatriz Vicente Guerreiro's Master's thesis](http://hdl.handle.net/10362/202184).
+This repository contains the python scripts developed to process and analyse kinetic, kinematic, and electromyographic recordings collected during the ASTROPOWER project's pilot study. The [Acoustic BioPower Dataset](https://doi.org/10.6084/m9.figshare.32090722) is available on Figshare, and the processing pipeline was developed as part of [Beatriz Guerreiro's Master's thesis](http://hdl.handle.net/10362/202184).
 
 The pilot study investigated whether acoustic biofeedback (ABF) acutely influences muscle power production compared with gym music (GM) in male and female participants. It also examined sex-related differences in neuromuscular coordination of the upper and lower limbs under both auditory conditions. The work aimed to establish a reference for performance in healthy young adults and to assess the feasibility of this approach for future studies involving older adults.
 
@@ -49,7 +49,7 @@ Exercise recordings are whitespace-delimited `.txt` files with one header row fo
 | `EMGL` | Raw EMG from the vastus lateralis (lower limb) |
 | `ECG` | Raw electrocardiographic signal |
 
-The physiological and biomechanical channels contain unprocessed digital acquisition values and require sensor-specific transfer functions to obtain physical units. Signals were acquired at **1,000 Hz**, as reflected in the supplied configuration. The pipeline selects `EMGA` for bench press and `EMGL` for squat.
+The physiological and biomechanical channels contain unprocessed digital acquisition values and require sensor-specific transfer functions to obtain physical units. Signals were acquired at **1000 Hz**, as reflected in the supplied configuration. The pipeline selects `EMGA` for bench press and `EMGL` for squat.
 
 ## Repository Structure
 
@@ -67,7 +67,7 @@ The physiological and biomechanical channels contain unprocessed digital acquisi
 
 ## Installation
 
-The project was developed using **Python 3.10**. From the repository directory, install the required Python packages:
+The project was developed using **python 3.10**. From the repository directory, install the required python packages:
 
 ```bash
 python -m pip install -r requirements.txt
@@ -134,7 +134,7 @@ The pipeline comprises the following stages:
 5. **EMG metrics:** Detect activation onset and compute timing, envelope rise measures, and median frequency.
 6. **Reporting:** Generate diagnostic figures and repetition-level CSV metrics.
 
-The methodological details, mathematical formulations, and parameter choices are documented in [*The Acute Effects of Acoustic Biofeedback on Muscle Power*](http://hdl.handle.net/10362/202184), Beatriz Vicente Guerreiro's 2025 Master's thesis. The implementation is distributed across `processing.py`, `detection.py`, `metrics.py`, `analysis.py`, and `main_pipeline.py`.
+The methodological details, mathematical formulations, and parameter choices are documented in [*The Acute Effects of Acoustic Biofeedback on Muscle Power*](http://hdl.handle.net/10362/202184), Beatriz Guerreiro's 2025 Master's thesis. The implementation is distributed across `processing.py`, `detection.py`, `metrics.py`, `analysis.py`, and `main_pipeline.py`.
 
 ## Output Metrics
 
@@ -234,9 +234,11 @@ Contributors:
 
 - Beatriz Guerreiro
 - Dania Furk
+- Luís Silva
+- Hugo Gamboa
 
 **Repository:** ASTROPOWER — Biomechanical Signal Processing and Analysis  
-**GitHub:** `[Repository URL]`
+**GitHub:** `[Repository URL](https://github.com/daniafurk/acousticbiopower.git)`
 
 ### Associated dataset
 
@@ -255,9 +257,3 @@ Guerreiro, B. V. (2025). *The Acute Effects of Acoustic Biofeedback on Muscle Po
     url    = {http://hdl.handle.net/10362/202184}
 }
 ```
-
-## License
-
-The licensing terms for the software are under review. Until the rights holders authorize and publish an explicit software license, all rights are reserved. Availability of this repository does not, by itself, grant general permission to copy, modify, or redistribute the software beyond applicable law and the hosting platform's terms.
-
-The [associated dataset](https://doi.org/10.6084/m9.figshare.32090722) is distributed separately under the reuse conditions stated on Figshare.
